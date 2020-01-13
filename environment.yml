@@ -9,6 +9,5 @@ dependencies:
     - matplotlib
     - pandas
     - thinc
-    - tensorflow
 
  
