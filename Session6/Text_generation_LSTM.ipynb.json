@@ -1,0 +1,365 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "2.1.0\n"
+     ]
+    }
+   ],
+   "source": [
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "import os\n",
+    "import matplotlib as plm\n",
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "import tensorflow as tf\n",
+    "from tensorflow import keras\n",
+    "print(tf.__version__)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# https://storage.gooleapis.com/download.tensorflow.org/data/shakespeare.txt\n",
+    "input_filepath = \"./shakespeaere.txt\"\n",
+    "text = open(input_filepath, 'r').read()\n",
+    "print(len(text))\n",
+    "print(text[0:100])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 1、generate vocab\n",
+    "# 2、build mapping  char -> id\n",
+    "# 3、data --> id_data\n",
+    "# 4、abcd --> a->b->c->d-><eos>\n",
+    "\n",
+    "vocab = sorted(set(text))\n",
+    "print(len(vocab))\n",
+    "print(vocab)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 注意这里生成词典的方式\n",
+    "char2idx = {char:idx for idx, char in enumerate(vocab)}\n",
+    "print(char2idx)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 列表转为numpy.array\n",
+    "idx2char = np.array(vocab)\n",
+    "print(idx2char)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 数据转为id\n",
+    "text_as_int = np.array([char2idx[c] for c in text])\n",
+    "print(text_as_int[0:10])\n",
+    "print(text[0:10])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 生成输入和输出\n",
+    "def split_input_target(id_text):\n",
+    "    \"\"\"\n",
+    "    abcde --> abcd\n",
+    "               ⬇️\n",
+    "              bcde\n",
+    "    \n",
+    "    \"\"\"\n",
+    "    return id_text[0:-1], id_text[1:]\n",
+    "# 将id_text转为dataset\n",
+    "char_dataset = tf.data.Dataset.from_tensor_slices(text_as_int) # 字符级dataset\n",
+    "\n",
+    "# 转为句子级\n",
+    "seq_length = 100\n",
+    "seq_dataset = char_dataset.batch(seq_length + 1, # split_input_target中长度会减一\n",
+    "                          drop_remainder = True) # 做batch到最后，不够一个batch的部分舍弃\n",
+    "\n",
+    "for ch_id in char_dataset.take(2):\n",
+    "    print(ch_id, idx2char[ch_id.numpy()])\n",
+    "\n",
+    "for seq_id in seq_dataset.take(2):\n",
+    "    print(seq_id)  # 整数的列表\n",
+    "    print(repr(''.join(idx2char[seq_id.numpy()]))) # 整数变成字符，再拼接起来 "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "seq_dataset = seq_dataset.map(split_input_target)\n",
+    "\n",
+    "for item_input, input_output in seq_dataset.take(2):\n",
+    "    print(item_input.numpy())\n",
+    "    print(item_output.numpy())"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "batch_size = 64\n",
+    "buffer_size = 10000\n",
+    "\n",
+    "seq_dataset = seq_dataset.shuffle(buffer_size).batch(batch_size, drop_remainder = True)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "vocab_size = len(vocab)\n",
+    "embedding_dim = 256\n",
+    "rnn_uints = 1024\n",
+    "\n",
+    "def build_model(vocab_size, embedding_dim, ruu_uints, batch_size):\n",
+    "    model = keras.models.Sequential([\n",
+    "        keras.layers.Embedding(vocab_size, embedding_dim, \n",
+    "                               batch_input_shape = [batch_size, None]),\n",
+    "        keras.layers.LSTM(uints = rnn_uints, \n",
+    "                          # 重要改动1: 调参\n",
+    "                          stateful = True,\n",
+    "                          recurrent_initializer = 'glorot_uniform',\n",
+    "                          return_sequences = True), # split_input_target函数返回的都是序列\n",
+    "        keras.layers.Dense(vocab_size)\n",
+    "    ])\n",
+    "    return model\n",
+    "\n",
+    "model = build_model(vocab_size, embedding_dim, rnn_uints, batch_size)\n",
+    "\n",
+    "model.summary()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 实验预测\n",
+    "for input_example_batch, target_example_batch in seq_dataset.take(1):\n",
+    "    example_batch_predictions = model(input_example_batch) # model作为函数使用\n",
+    "    print(example_batch_predictions.shape)\n",
+    "# (batch_size, len(sentence), vocab_size)\n",
+    "# vocab_size 类别预测，各个类别的概率分布"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# random sampling --random 可以产生多个序列\n",
+    "#  max sampling   -- greedy 只能产生一个序列\n",
+    "# logits:计算softmax之前的值\n",
+    "sample_indices = tf.random.categorical(logits = example_batch_prddictions[0],\n",
+    "                                       num_samples = 1)\n",
+    "print(sample_indices)  # (100, 65)对100个位置中的65个值做sampling，65-->1\n",
+    "\n",
+    "# 还可以再去掉多余的维度1\n",
+    "sample_indices = tf.squeeze(sample_indices, axis = -1)\n",
+    "print(ample_indices)  # (100,)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(\"Input:\", repr(\"\".join(idx2char[input_example_batch[0]])))\n",
+    "print(\"Output:\", repr(\"\".join(idx2char[target_example_batch[0]])))\n",
+    "print()\n",
+    "print(\"Predictions:\", repr(\"\".join(idx2char[sample_indices])))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 定义模型的损失函数, 7-7 9:38 再听\n",
+    "def loss(labels, logits):\n",
+    "    return keras.losses.sparse_categorical_crossentropy(labels, logits, from_logits = True)\n",
+    "\n",
+    "model.complie(loss = loss, optimizer = 'adam')\n",
+    "example_loss = loss(target_example_batch, example_batch_predictions)\n",
+    "print(example_loss.shape)\n",
+    "print(example_loss.numpy().mean())"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 因为训练中不会保存文本，所以需要保存模型\n",
+    "output_dir = './text_generation_checkpoints'\n",
+    "if not os.path.exists(output_dir):\n",
+    "    os.mkdir(output_dir)\n",
+    "checkpoints_prefix = os.path.join(output_dir, 'ckpt_{epoch}')\n",
+    "checkpoint_callbacks = keras.callbacks.ModelCheckpoint(\n",
+    "    filepath = checkpoints_prefix,\n",
+    "    save_weights_only = True)\n",
+    "\n",
+    "epochs = 10\n",
+    "history = model.fit(seq_dataset, epochs = epochs,\n",
+    "                   callbacks = [checkpoint_callbacks])\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 查看最新保存的模型\n",
+    "tf.train.latest_checkpoint(output_dir)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "文本生成"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 在checkpoint中载入模型\n",
+    "model2 = build_model(vocab_size, embedding_dim, \n",
+    "                     rnn_uints,\n",
+    "                     batch_size = 1) # 在做文本生成时一次只生成一个句子\n",
+    "model2.load_weights(tf.train.latest_checkpoint(output_dir))\n",
+    "\n",
+    "# 设置输入的size\n",
+    "# batch_size = 1, 一个样本（一句话）， None表示可以为变长序列\n",
+    "model2.build(tf.TensorShape([1, None]))\n",
+    "\n",
+    "# 流生成程\n",
+    "# start ch sequence A,\n",
+    "# A -> model -> b   sample得出\n",
+    "# A.append(b) -->B\n",
+    "# B(Ab) -> model -> c\n",
+    "# B.append(c) --> C\n",
+    "# C(ABc) -> model ->....\n",
+    "\n",
+    "model2.summary()\n",
+    "\n",
+    "def generate_text(model, strat_string, num_generate = 1000):\n",
+    "    # start_string --> id\n",
+    "    input_eval = [char2idx[ch] for ch in start_string]\n",
+    "    # 扩展 [1, None] 二维， input_eval是一维的\n",
+    "    input_eval = tf.expand_dims(input_eval, 0)\n",
+    "    \n",
+    "    text_genetated = []\n",
+    "    model.reset_states()\n",
+    "    \n",
+    "    # 重要改动2: 添加temperature\n",
+    "    # temperature > 1, 预测出的句子更加随意 random\n",
+    "    # temperature < 1, 概率分布越陡峭，倾向于找最大值  greedy\n",
+    "    temperature = 0.5\n",
+    "    \n",
+    "    for _ in range(num_generat):\n",
+    "        # 1、model inference -> predictions\n",
+    "        # 2、sample ->ch ->text_generated\n",
+    "        # 3、update input_eval\n",
+    "        \n",
+    "        # predictions: [batch_size, len(input_eval), vocab_size]\n",
+    "        predictions = model(input_eval)\n",
+    "        \n",
+    "        # logits = x, logits -> softmax -> prob\n",
+    "        # eg: logits = 2, 1  e^2/(e^2 + e^1) = 0.73, e^1/(e^2 + e^1) = 0.27 更加均匀\n",
+    "        #     logits = 4, 2  e^4/(e^4 + e^2) = 0.88, e^2/(e^4 + e^2) = 0.12 比较陡峭\n",
+    "        predictions = predictions / temperature\n",
+    "        \n",
+    "        # predictions: [len(input_eval), vocab_size]\n",
+    "        predictions = tf.squeeze(predictions, 0)\n",
+    "        # predicted_id: [len(input_eval), 1]\n",
+    "        # a b c --> b c d\n",
+    "        # 只用最后一个\n",
+    "        predicted_id = tf.random.categorical(predictions, num_samples = 1)[-1, 0].numpy()\n",
+    "        \n",
+    "        text_generated.append(idx2char[pridicted_id])\n",
+    "        \n",
+    "        # 为什么input_eval替换成predicted_id，而不是直接在input_eval后面添加一个呢？\n",
+    "        # 看思维导图中的视频截图，我们需要的只是最近一步的输出，而不是累计，否则效率低\n",
+    "        input_eval = tf.expand_dims([predicted_id], 0)\n",
+    "    return start_string + ''.join(text_generated)\n",
+    "\n",
+    "new_text = genetate_text(model2, \"All:\")\n",
+    "print(new_text)"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.6.7"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
