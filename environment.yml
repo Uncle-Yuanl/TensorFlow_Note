@@ -10,4 +10,4 @@ dependencies:
     - pandas
     - thinc
     - tensorflow
- 
+    - tensorflow_datasets
